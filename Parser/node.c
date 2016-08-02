@@ -15,6 +15,8 @@ PyNode_New(int type)
     n->n_lineno = 0;
     n->n_nchildren = 0;
     n->n_child = NULL;
+	// Print statement modification: Initialize flag
+    n->n_wasModified = false;
     return n;
 }
 
@@ -109,6 +111,7 @@ PyNode_AddChild(node *n1, int type, char *str, int lineno, int col_offset)
     n->n_col_offset = col_offset;
     n->n_nchildren = 0;
     n->n_child = NULL;
+	n->n_wasModified = false;
     return 0;
 }
 
@@ -144,7 +147,13 @@ freechildren(node *n)
         freechildren(CHILD(n, i));
     if (n->n_child != NULL)
         PyObject_FREE(n->n_child);
-    if (STR(n) != NULL)
+	/*
+		Print statement modification :
+		Free all nodes except those marked modified.
+		Those are virtual nodes in the parse three that don't actually reside in the statement's memory,
+		Freeing them is dangerous.
+	*/
+    if (STR(n) != NULL && (!n->n_wasModified))
         PyObject_FREE(STR(n));
 }
 

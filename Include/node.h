@@ -6,6 +6,7 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+#include <stdbool.h>
 
 typedef struct _node {
     short		n_type;
@@ -14,6 +15,8 @@ typedef struct _node {
     int			n_col_offset;
     int			n_nchildren;
     struct _node	*n_child;
+	// Print statement modification: Added modified flag
+    bool 		n_wasModified;
 } node;
 
 PyAPI_FUNC(node *) PyNode_New(int type);

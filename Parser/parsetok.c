@@ -9,7 +9,7 @@
 #include "parsetok.h"
 #include "errcode.h"
 #include "graminit.h"
-
+#include <stdbool.h>
 
 /* Forward */
 static node *parsetok(struct tok_state *, grammar *, int, perrdetail *, int *);
@@ -177,6 +177,22 @@ warn(const char *msg, const char *filename, int lineno)
 #endif
 #endif
 
+/*
+	Print statement modification:
+	This helper function marks ")" and "(" virtual nodes with a modified flag.
+	This will prevent trying to free them (they are virtual and don't actually reside in memory, so freeing them is dangerous).
+*/
+void markModifiedFlags(node* n) {
+	int i;
+	for (i = NCH(n); --i >= 0; )
+		markModifiedFlags(CHILD(n, i));
+	if (n && n->n_str) {
+		if ((!strcmp(")", STR(n))) || (!strcmp("(", STR(n)))) {
+			n->n_wasModified = true;
+		}
+	}
+}
+
 /* Parse input coming from the given tokenizer structure.
    Return error code. */
 
@@ -197,6 +213,9 @@ parsetok(struct tok_state *tok, grammar *g, int start, perrdetail *err_ret,
     if (*flags & PyPARSE_BARRY_AS_BDFL)
         ps->p_flags |= CO_FUTURE_BARRY_AS_BDFL;
 #endif
+
+	bool shouldAddClosingParenthesis = false;
+	bool shouldAddOpeningParenthesis = false;
 
     for (;;) {
         char *a, *b;
@@ -259,16 +278,74 @@ parsetok(struct tok_state *tok, grammar *g, int start, perrdetail *err_ret,
         else
             col_offset = -1;
 
+		/*
+			Print statement modification:
+			Here we add an opening parenthesis token if:
+				- The last token was 'print'
+				- The current token is not '(' -> Which means the user simply wants the print function
+		*/
+		if (shouldAddOpeningParenthesis && strlen(str)) {
+			shouldAddOpeningParenthesis = false;
+			// Print statement modification: In case this is the print function itself - no need to modify any tokens
+			if (strcmp("(", str) != 0) {
+				// Print statement modification: Mark the flag to add closing parenthesis later on
+				shouldAddClosingParenthesis = true;
+				if ((err_ret->error =
+					PyParser_AddToken(ps, 7, "(",
+						tok->lineno, col_offset + strlen("print"),
+						&(err_ret->expected))) != E_OK) {
+					if (err_ret->error != E_DONE) {
+						PyObject_FREE(str);
+						err_ret->token = type;
+					}
+				}
+			}
+		}
+
+		/*
+			Print statement modification:
+			Here we add a closing parenthesis token if we're in an 'ending' token (either an empty token or ';')
+		*/
+		if (shouldAddClosingParenthesis && ((strlen(str) == 0) || (!strcmp(";", str)))) {
+			shouldAddClosingParenthesis = false;
+			if ((err_ret->error =
+				PyParser_AddToken(ps, 8, ")",
+					tok->lineno, col_offset + 1,
+					&(err_ret->expected))) != E_OK) {
+				if (err_ret->error != E_DONE) {
+					PyObject_FREE(str);
+					err_ret->token = type;
+				}
+			}
+			/*
+			Print statement modification:
+			If any modifications happened - Mark those specific nodes with a modified flag.
+			This will prevent those 'virtual' nodes from being freed later on.
+			They don't actually live in memory, so if we try to free them we'll get a seg fault / undefined behavior.
+			*/
+			markModifiedFlags(ps->p_tree);
+		}
+
         if ((err_ret->error =
              PyParser_AddToken(ps, (int)type, str,
                                tok->lineno, col_offset,
                                &(err_ret->expected))) != E_OK) {
             if (err_ret->error != E_DONE) {
+				// Print statement modification: If we got a syntax error and we've in the middle of modifying our token tree - Mark the virtual nodes with our flag
+				if (shouldAddOpeningParenthesis || shouldAddClosingParenthesis) {
+					markModifiedFlags(ps->p_tree);
+				}
                 PyObject_FREE(str);
                 err_ret->token = type;
             }
             break;
         }
+
+		// Print statement modification: If the current token is 'print' - Mark modification and opening parenthesis adding flags
+		if (!strcmp("print", str)) {
+			shouldAddOpeningParenthesis = true;
+			continue;
+		}
     }
 
     if (err_ret->error == E_DONE) {

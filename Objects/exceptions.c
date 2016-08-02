@@ -2853,20 +2853,6 @@ _check_for_legacy_statements(PySyntaxErrorObject *self, Py_ssize_t start)
         return 0;
     }
 
-    /* Check for legacy print statements */
-    if (print_prefix == NULL) {
-        print_prefix = PyUnicode_InternFromString("print ");
-        if (print_prefix == NULL) {
-            return -1;
-        }
-    }
-    if (PyUnicode_Tailmatch(self->text, print_prefix,
-                            start, text_len, -1)) {
-        Py_XSETREF(self->msg,
-                  PyUnicode_FromString("Missing parentheses in call to 'print'"));
-        return 1;
-    }
-
     /* Check for legacy exec statements */
     if (exec_prefix == NULL) {
         exec_prefix = PyUnicode_InternFromString("exec ");
